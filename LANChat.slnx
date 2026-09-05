@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="LANChat.Client/LANChat.Client.csproj" />
+  <Project Path="LANChat.Server/LANChat.Server.csproj" />
+</Solution>

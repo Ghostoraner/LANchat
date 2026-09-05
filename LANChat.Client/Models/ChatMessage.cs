@@ -1,0 +1,19 @@
+using System;
+using System.Text.Json.Serialization;
+
+namespace LANChat.Client.Models;
+
+public class ChatMessage
+{
+    [JsonPropertyName("type")]
+    public string Type { get; set; } = "message";
+
+    [JsonPropertyName("sender")]
+    public string Sender { get; set; } = string.Empty;
+
+    [JsonPropertyName("content")]
+    public string Content { get; set; } = string.Empty;
+
+    [JsonPropertyName("timestamp")]
+    public DateTime Timestamp { get; set; } = DateTime.UtcNow;
+}

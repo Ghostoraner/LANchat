@@ -1,0 +1,45 @@
+﻿<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="LANChat.Client.MainWindow"
+        Title="LAN Chat"
+        Width="700" Height="480"
+        MinWidth="550" MinHeight="380"
+        WindowStartupLocation="CenterScreen">
+
+    <Grid RowDefinitions="Auto, *, Auto" Margin="14">
+        
+        <WrapPanel Grid.Row="0" Margin="0,0,0,10" VerticalAlignment="Center">
+            <StackPanel Orientation="Horizontal" Margin="0,0,10,6">
+                <TextBlock Text="IP:" VerticalAlignment="Center" Margin="0,0,4,0"/>
+                <TextBox Name="TxtIp" Text="127.0.0.1" Width="120" Height="32"/>
+            </StackPanel>
+
+            <StackPanel Orientation="Horizontal" Margin="0,0,10,6">
+                <TextBlock Text="Порт:" VerticalAlignment="Center" Margin="0,0,4,0"/>
+                <TextBox Name="TxtPort" Text="5000" Width="65" Height="32"/>
+            </StackPanel>
+
+            <StackPanel Orientation="Horizontal" Margin="0,0,10,6">
+                <TextBlock Text="Ник:" VerticalAlignment="Center" Margin="0,0,4,0"/>
+                <TextBox Name="TxtUsername" Text="User" Width="110" Height="32"/>
+            </StackPanel>
+
+            <Button Name="BtnConnect" Content="Подключиться" 
+                    Height="32" Padding="12,0" Click="BtnConnect_Click" Margin="0,0,0,6"/>
+        </WrapPanel>
+
+        
+        <ListBox Name="LbChat" Grid.Row="1" Margin="0,0,0,10" CornerRadius="4"/>
+
+        
+        <Grid Grid.Row="2" ColumnDefinitions="*, Auto">
+            <TextBox Name="TxtMessage" Grid.Column="0" 
+                     Watermark="Введите сообщение..." 
+                     Height="36" KeyDown="TxtMessage_KeyDown"/>
+            <Button Name="BtnSend" Grid.Column="1" 
+                    Content="Отправить" 
+                    Margin="8,0,0,0" Height="36" Padding="16,0" 
+                    Click="BtnSend_Click"/>
+        </Grid>
+    </Grid>
+</Window>
