@@ -9,66 +9,90 @@ namespace LANChat.Client.Services;
 
 public class ChatClient
 {
-    private TcpClient? _client;
+    private TcpClient? _tcpClient;
     private StreamReader? _reader;
     private StreamWriter? _writer;
-    private string _username = "User";
+    private bool _isRunning;
 
-    public bool IsConnected => _client?.Connected ?? false;
     public event Action<ChatMessage>? OnMessageReceived;
 
     public async Task ConnectAsync(string ip, int port, string username)
     {
-        _username = username;
-        _client = new TcpClient();
-        await _client.ConnectAsync(ip, port);
-        
-        var stream = _client.GetStream();
+        _tcpClient = new TcpClient();
+        await _tcpClient.ConnectAsync(ip, port);
+        var stream = _tcpClient.GetStream();
         _reader = new StreamReader(stream);
         _writer = new StreamWriter(stream) { AutoFlush = true };
+        _isRunning = true;
 
-        
-        var joinMsg = new ChatMessage { Type = "join", Sender = _username, Content = "присоединился к чату" };
-        await _writer.WriteLineAsync(JsonSerializer.Serialize(joinMsg));
+        var handshake = new ChatMessage
+        {
+            Sender = username,
+            Content = "",
+            Timestamp = DateTime.UtcNow
+        };
+        await _writer.WriteLineAsync(JsonSerializer.Serialize(handshake));
 
-        _ = ListenAsync();
+        string? line = await _reader.ReadLineAsync();
+        if (line != null)
+        {
+            var response = JsonSerializer.Deserialize<ChatMessage>(line);
+            
+            if (response?.Type == "error")
+            {
+                _tcpClient.Close();
+                throw new Exception(response.Content);
+            }
+
+            if (response != null)
+            {
+                OnMessageReceived?.Invoke(response);
+            }
+        }
+
+        _ = Task.Run(ReceiveLoop);
     }
 
     public async Task SendMessageAsync(string text)
     {
-        if (_writer != null && IsConnected)
-        {
-            var msg = new ChatMessage { Type = "message", Sender = _username, Content = text };
-            await _writer.WriteLineAsync(JsonSerializer.Serialize(msg));
-        }
-    }
+        if (_writer == null || !_tcpClient!.Connected) return;
 
-    private async Task ListenAsync()
-    {
-        try
+        var message = new ChatMessage
         {
-            while (IsConnected && _reader != null)
-            {
-                string? line = await _reader.ReadLineAsync();
-                if (string.IsNullOrWhiteSpace(line)) continue;
+            Content = text,
+            Timestamp = DateTime.UtcNow
+        };
 
-                var msg = JsonSerializer.Deserialize<ChatMessage>(line);
-                if (msg != null)
-                {
-                    OnMessageReceived?.Invoke(msg);
-                }
-            }
-        }
-        catch { }
-        finally
-        {
-            Disconnect();
-        }
+        await _writer.WriteLineAsync(JsonSerializer.Serialize(message));
     }
 
     public void Disconnect()
     {
-        _client?.Close();
-        _client = null;
+        _isRunning = false;
+        _reader?.Close();
+        _writer?.Close();
+        _tcpClient?.Close();
+    }
+
+    private async Task ReceiveLoop()
+    {
+        try
+        {
+            while (_isRunning && _tcpClient!.Connected && _reader != null)
+            {
+                string? line = await _reader.ReadLineAsync();
+                if (line == null) break;
+
+                var message = JsonSerializer.Deserialize<ChatMessage>(line);
+                if (message != null)
+                {
+                    OnMessageReceived?.Invoke(message);
+                }
+            }
+        }
+        catch
+        {
+            
+        }
     }
 }

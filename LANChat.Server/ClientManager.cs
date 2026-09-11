@@ -1,32 +1,47 @@
+using System;
 using System.Collections.Concurrent;
-using System.Threading.Tasks;
-using LANChat.Server.Models;
+using System.Collections.Generic;
+using System.Linq;
 
 namespace LANChat.Server
 {
     public class ClientManager
     {
-        private readonly ConcurrentDictionary<string, ClientConnection> _clients = new();
+        // Словарь с регистронезависимыми ключами (никнеймы не будут дублироваться и будут нормально удаляться)
+        private readonly ConcurrentDictionary<string, ClientConnection> _clients = new(StringComparer.OrdinalIgnoreCase);
 
-        public void Add(ClientConnection client)
+        public bool IsUsernameTaken(string username)
         {
-            _clients[client.Id] = client;
+            return _clients.ContainsKey(username);
         }
 
-        public void Remove(ClientConnection client)
+        public bool TryAddClient(string username, ClientConnection client)
         {
-            _clients.TryRemove(client.Id, out _);
+            return _clients.TryAdd(username, client);
         }
 
-        public async Task BroadcastAsync(ChatMessage message, string? excludeClientId = null)
+        public void Remove(string username)
         {
-            foreach (var client in _clients.Values)
+            if (!string.IsNullOrEmpty(username))
             {
-                if (client.Id != excludeClientId)
+                _clients.TryRemove(username, out _);
+            }
+        }
+
+        public void Broadcast(string message, string excludeUser = "")
+        {
+            foreach (var kvp in _clients)
+            {
+                if (!kvp.Key.Equals(excludeUser, StringComparison.OrdinalIgnoreCase))
                 {
-                    await client.SendMessageAsync(message);
+                    _ = kvp.Value.SendMessageAsync(message);
                 }
             }
+        }
+
+        public IEnumerable<string> GetOnlineUsernames()
+        {
+            return _clients.Keys.ToList();
         }
     }
 }
