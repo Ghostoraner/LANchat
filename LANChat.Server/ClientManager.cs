@@ -7,25 +7,16 @@ namespace LANChat.Server
 {
     public class ClientManager
     {
-        // Словарь с регистронезависимыми ключами (никнеймы не будут дублироваться и будут нормально удаляться)
         private readonly ConcurrentDictionary<string, ClientConnection> _clients = new(StringComparer.OrdinalIgnoreCase);
 
-        public bool IsUsernameTaken(string username)
-        {
-            return _clients.ContainsKey(username);
-        }
+        public bool IsUsernameTaken(string username) => _clients.ContainsKey(username);
 
-        public bool TryAddClient(string username, ClientConnection client)
-        {
-            return _clients.TryAdd(username, client);
-        }
+        public bool TryAddClient(string username, ClientConnection client) => _clients.TryAdd(username, client);
 
         public void Remove(string username)
         {
             if (!string.IsNullOrEmpty(username))
-            {
                 _clients.TryRemove(username, out _);
-            }
         }
 
         public void Broadcast(string message, string excludeUser = "")
@@ -34,14 +25,19 @@ namespace LANChat.Server
             {
                 if (!kvp.Key.Equals(excludeUser, StringComparison.OrdinalIgnoreCase))
                 {
-                    _ = kvp.Value.SendMessageAsync(message);
+                    try
+                    {
+                        
+                        _ = kvp.Value.SendMessageAsync(message);
+                    }
+                    catch
+                    {
+                       
+                    }
                 }
             }
         }
 
-        public IEnumerable<string> GetOnlineUsernames()
-        {
-            return _clients.Keys.ToList();
-        }
+        public IEnumerable<string> GetOnlineUsernames() => _clients.Keys.ToList();
     }
 }

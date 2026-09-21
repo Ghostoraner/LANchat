@@ -1,6 +1,9 @@
 using System;
 using System.IO;
+using System.Net.Security;
 using System.Net.Sockets;
+using System.Security.Authentication;
+using System.Security.Cryptography.X509Certificates;
 using System.Text.Json;
 using System.Threading.Tasks;
 using LANChat.Server.Models;
@@ -11,78 +14,65 @@ namespace LANChat.Server
     {
         private readonly TcpClient _tcpClient;
         private readonly ClientManager _clientManager;
+        private readonly X509Certificate2 _certificate;
+        private SslStream? _sslStream;
         private StreamReader? _reader;
         private StreamWriter? _writer;
+        
         public string Username { get; private set; } = string.Empty;
+        private DateTime _lastMessageTime = DateTime.MinValue;
 
-        public ClientConnection(TcpClient tcpClient, ClientManager clientManager)
+       
+        private const int MaxMessageLength = 5000; 
+        private const int RateLimitMs = 500;
+
+        public ClientConnection(TcpClient tcpClient, ClientManager clientManager, X509Certificate2 certificate)
         {
             _tcpClient = tcpClient;
             _clientManager = clientManager;
+            _certificate = certificate;
         }
 
         public async Task ProcessAsync()
         {
-            var stream = _tcpClient.GetStream();
-            _reader = new StreamReader(stream);
-            _writer = new StreamWriter(stream) { AutoFlush = true };
-
             try
             {
+                var stream = _tcpClient.GetStream();
+                _sslStream = new SslStream(stream, false);
+                await _sslStream.AuthenticateAsServerAsync(_certificate, false, SslProtocols.Tls12 | SslProtocols.Tls13, true);
+
+                _reader = new StreamReader(_sslStream);
+                _writer = new StreamWriter(_sslStream) { AutoFlush = true };
+
                 string? line = await _reader.ReadLineAsync();
-                if (string.IsNullOrEmpty(line)) return;
+                if (string.IsNullOrEmpty(line) || line.Length > MaxMessageLength) return;
 
                 var initialMsg = JsonSerializer.Deserialize<ChatMessage>(line);
                 string requestedName = initialMsg?.Sender?.Trim() ?? "User";
-
-                if (string.IsNullOrEmpty(requestedName))
-                {
-                    requestedName = "User";
-                }
+                if (string.IsNullOrEmpty(requestedName)) requestedName = "User";
 
                 if (_clientManager.IsUsernameTaken(requestedName))
                 {
-                    var errorMsg = JsonSerializer.Serialize(new ChatMessage
-                    {
-                        Sender = "Система",
-                        Type = "error",
-                        Content = "Этот ник уже занят. Выберите другой.",
-                        Timestamp = DateTime.UtcNow
-                    });
-                    await _writer.WriteLineAsync(errorMsg);
+                    await SendSystemErrorAsync("Этот ник уже занят. Выберите другой.");
                     return;
                 }
 
                 Username = requestedName;
                 if (!_clientManager.TryAddClient(Username, this))
                 {
-                    var errorMsg = JsonSerializer.Serialize(new ChatMessage
-                    {
-                        Sender = "Система",
-                        Type = "error",
-                        Content = "Не удалось зарегистрировать ник.",
-                        Timestamp = DateTime.UtcNow
-                    });
-                    await _writer.WriteLineAsync(errorMsg);
+                    await SendSystemErrorAsync("Не удалось зарегистрировать ник.");
                     return;
                 }
 
-                var okMsg = JsonSerializer.Serialize(new ChatMessage
+                await _writer.WriteLineAsync(JsonSerializer.Serialize(new ChatMessage
                 {
-                    Sender = "Система",
-                    Type = "system",
-                    Content = "Успешно подключено к серверу.",
-                    Timestamp = DateTime.UtcNow
-                });
-                await _writer.WriteLineAsync(okMsg);
+                    Sender = "Система", Type = "system", Content = "Успешно подключено к серверу (TLS).", Timestamp = DateTime.UtcNow
+                }));
 
                 BroadcastUserList();
                 _clientManager.Broadcast(JsonSerializer.Serialize(new ChatMessage
                 {
-                    Sender = "Система",
-                    Type = "system",
-                    Content = $"{Username} присоединился к чату.",
-                    Timestamp = DateTime.UtcNow
+                    Sender = "Система", Type = "system", Content = $"{Username} присоединился к чату.", Timestamp = DateTime.UtcNow
                 }), Username);
 
                 while (_tcpClient.Connected)
@@ -90,8 +80,19 @@ namespace LANChat.Server
                     line = await _reader.ReadLineAsync();
                     if (line == null) break;
 
+                    
+                    if (line.Length > MaxMessageLength) continue;
+
+                   
+                    if ((DateTime.UtcNow - _lastMessageTime).TotalMilliseconds < RateLimitMs)
+                    {
+                        await SendSystemErrorAsync("Слишком частые сообщения. Подождите.");
+                        continue;
+                    }
+                    _lastMessageTime = DateTime.UtcNow;
+
                     var msg = JsonSerializer.Deserialize<ChatMessage>(line);
-                    if (msg != null)
+                    if (msg != null && msg.Type != "error" && msg.Type != "system")
                     {
                         msg.Sender = Username;
                         msg.Timestamp = DateTime.UtcNow;
@@ -99,10 +100,7 @@ namespace LANChat.Server
                     }
                 }
             }
-            catch
-            {
-               
-            }
+            catch {}
             finally
             {
                 if (!string.IsNullOrEmpty(Username))
@@ -111,10 +109,7 @@ namespace LANChat.Server
                     BroadcastUserList();
                     _clientManager.Broadcast(JsonSerializer.Serialize(new ChatMessage
                     {
-                        Sender = "Система",
-                        Type = "system",
-                        Content = $"{Username} покинул чат.",
-                        Timestamp = DateTime.UtcNow
+                        Sender = "Система", Type = "system", Content = $"{Username} покинул чат.", Timestamp = DateTime.UtcNow
                     }));
                 }
                 _tcpClient.Close();
@@ -124,27 +119,26 @@ namespace LANChat.Server
         public async Task SendMessageAsync(string jsonMessage)
         {
             if (_writer == null) return;
-            try
+            try { await _writer.WriteLineAsync(jsonMessage); }
+            catch {  }
+        }
+
+        private async Task SendSystemErrorAsync(string error)
+        {
+            if (_writer == null) return;
+            await _writer.WriteLineAsync(JsonSerializer.Serialize(new ChatMessage
             {
-                await _writer.WriteLineAsync(jsonMessage);
-            }
-            catch
-            {
-               
-            }
+                Sender = "Система", Type = "error", Content = error, Timestamp = DateTime.UtcNow
+            }));
         }
 
         private void BroadcastUserList()
         {
             var users = string.Join(",", _clientManager.GetOnlineUsernames());
-            var userListMsg = JsonSerializer.Serialize(new ChatMessage
+            _clientManager.Broadcast(JsonSerializer.Serialize(new ChatMessage
             {
-                Sender = "System",
-                Type = "users",
-                Content = users,
-                Timestamp = DateTime.UtcNow
-            });
-            _clientManager.Broadcast(userListMsg);
+                Sender = "System", Type = "users", Content = users, Timestamp = DateTime.UtcNow
+            }));
         }
     }
 }
