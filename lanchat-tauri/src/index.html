@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <title>LANChat - Discord Style</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app">
+    <!-- Левая панель с иконкой сервера -->
+    <div class="servers-sidebar">
+      <div class="server-icon active" title="LANChat Server">L</div>
+    </div>
+
+    <!-- Панель подключения и списков -->
+    <div class="channels-sidebar">
+      <div class="server-title">LANChat Сервер</div>
+      
+      <div class="connection-panel">
+        <div class="input-group">
+          <input type="text" id="ip" value="127.0.0.1" placeholder="IP Сервера" />
+          <input type="number" id="port" value="5000" placeholder="Порт" style="width: 70px;" />
+        </div>
+        <input type="text" id="username" value="User" placeholder="Ваш никнейм" />
+        <div class="btn-group">
+          <button id="btn-connect">Подключиться</button>
+          <button id="btn-disconnect" class="btn-danger" style="display: none;">Отключиться</button>
+        </div>
+      </div>
+
+      <div class="users-header">ОНЛАЙН — <span id="users-count">0</span></div>
+      <div id="users-list" class="users-list"></div>
+    </div>
+
+    <!-- Основная зона чата -->
+    <div class="chat-area">
+      <div class="chat-header">
+        <span class="hashtag">#</span>
+        <span class="channel-name">общий-чат</span>
+        <span id="status-badge" class="status-badge offline">Офлайн</span>
+      </div>
+
+      <div id="messages" class="messages-container"></div>
+
+      <div class="input-container">
+        <input type="text" id="msg-input" placeholder="Написать в #общий-чат..." disabled />
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="main.js"></script>
+</body>
+</html>

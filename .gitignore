@@ -43,3 +43,4 @@ artifacts/
 
 # Generated files
 *.generated.cs
+target/
