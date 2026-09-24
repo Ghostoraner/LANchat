@@ -8,9 +8,24 @@ const messagesDiv = document.getElementById('messages');
 const usersListDiv = document.getElementById('users-list');
 const usersCountSpan = document.getElementById('users-count');
 const statusBadge = document.getElementById('status-badge');
+const recipientSelect = document.getElementById('recipient-select');
+const btnAttach = document.getElementById('btn-attach');
+const fileInput = document.getElementById('file-input');
+const typingIndicator = document.getElementById('typing-indicator');
 
 let isConnected = false;
+let myUsername = '';
 let onlineUsers = new Set();
+
+// username -> таймер, по истечении которого считаем что человек перестал печатать
+const typingUsers = new Map();
+const TYPING_TIMEOUT_MS = 3000;
+const TYPING_SEND_THROTTLE_MS = 2000;
+let lastTypingSentAt = 0;
+
+// Приём файлов: transferId -> { fileName, fileSize, totalChunks, chunks, sender, to }
+const incomingFiles = new Map();
+const FILE_CHUNK_CHARS = 4000; // размер одного base64-чанка в символах
 
 btnConnect.addEventListener('click', async () => {
   if (isConnected) return;
@@ -29,6 +44,7 @@ btnConnect.addEventListener('click', async () => {
 
   try {
     const res = await invoke('connect_to_server', { ip, port, username });
+    myUsername = username;
     setConnectedState(true);
     addSystemMessage('СИСТЕМА', res);
   } catch (err) {
@@ -50,17 +66,148 @@ msgInput.addEventListener('keypress', async (e) => {
     if (!isConnected) return;
 
     const text = msgInput.value.trim();
-    const myUsername = document.getElementById('username').value.trim();
+    const to = recipientSelect.value || null;
     msgInput.value = '';
 
     try {
-      await invoke('send_message', { content: text });
-      addChatMessage(myUsername, text, parseTimestamp(new Date()));
+      await invoke('send_json', {
+        payload: {
+          type: 'message',
+          sender: myUsername,
+          content: text,
+          timestamp: new Date().toISOString(),
+          to: to,
+        },
+      });
+      // Не добавляем сообщение локально: сервер разошлёт его обратно
+      // (публичное — всем включая нас, личное — эхом только нам самим),
+      // и оно отобразится через listen('new-message', ...).
     } catch (err) {
       addSystemMessage('ОШИБКА', err);
     }
   }
 });
+
+// Индикатор "печатает..." — отправляем не чаще, чем раз в TYPING_SEND_THROTTLE_MS
+msgInput.addEventListener('input', () => {
+  if (!isConnected) return;
+  const now = Date.now();
+  if (now - lastTypingSentAt < TYPING_SEND_THROTTLE_MS) return;
+  lastTypingSentAt = now;
+
+  invoke('send_json', {
+    payload: {
+      type: 'typing',
+      sender: myUsername,
+      content: '',
+      timestamp: new Date().toISOString(),
+    },
+  }).catch(() => {});
+});
+
+btnAttach.addEventListener('click', () => {
+  if (!isConnected) return;
+  fileInput.click();
+});
+
+fileInput.addEventListener('change', async () => {
+  const file = fileInput.files[0];
+  fileInput.value = '';
+  if (!file || !isConnected) return;
+  await sendFile(file);
+});
+
+async function sendFile(file) {
+  const to = recipientSelect.value || null;
+  const transferId = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
+
+  let base64;
+  try {
+    base64 = await fileToBase64(file);
+  } catch (e) {
+    addSystemMessage('ОШИБКА', 'Не удалось прочитать файл: ' + e);
+    return;
+  }
+
+  const totalChunks = Math.max(1, Math.ceil(base64.length / FILE_CHUNK_CHARS));
+
+  try {
+    for (let i = 0; i < totalChunks; i++) {
+      const chunk = base64.slice(i * FILE_CHUNK_CHARS, (i + 1) * FILE_CHUNK_CHARS);
+      await invoke('send_json', {
+        payload: {
+          type: 'file_chunk',
+          sender: myUsername,
+          content: chunk,
+          timestamp: new Date().toISOString(),
+          to: to,
+          transferId,
+          fileName: file.name,
+          fileSize: file.size,
+          chunkIndex: i,
+          totalChunks,
+        },
+      });
+    }
+  } catch (err) {
+    addSystemMessage('ОШИБКА', 'Ошибка отправки файла: ' + err);
+    return;
+  }
+
+  // Сервер не отсылает файл обратно отправителю — показываем локально сами.
+  const url = URL.createObjectURL(file);
+  addFileMessage(myUsername, file.name, file.size, url, !!to, to);
+}
+
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      // result выглядит как "data:<mime>;base64,AAAA..." — берём только часть после запятой
+      const result = reader.result;
+      const idx = result.indexOf(',');
+      resolve(idx >= 0 ? result.slice(idx + 1) : result);
+    };
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+}
+
+function handleFileChunk(msg) {
+  const id = msg.transferId;
+  if (!id) return;
+
+  let entry = incomingFiles.get(id);
+  if (!entry) {
+    entry = {
+      fileName: msg.fileName || 'файл',
+      fileSize: msg.fileSize || 0,
+      totalChunks: msg.totalChunks || 1,
+      chunks: new Array(msg.totalChunks || 1),
+      sender: msg.sender,
+      to: msg.to,
+    };
+    incomingFiles.set(id, entry);
+  }
+
+  entry.chunks[msg.chunkIndex] = msg.content;
+
+  const isComplete = entry.chunks.every((c) => typeof c === 'string');
+  if (!isComplete) return;
+
+  incomingFiles.delete(id);
+  try {
+    const base64 = entry.chunks.join('');
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    const blob = new Blob([bytes]);
+    const url = URL.createObjectURL(blob);
+    addFileMessage(entry.sender, entry.fileName, entry.fileSize, url, !!entry.to, entry.to);
+  } catch (e) {
+    addSystemMessage('ОШИБКА', `Не удалось собрать файл "${entry.fileName}": ${e}`);
+  }
+}
 
 listen('new-message', (event) => {
   const msg = event.payload;
@@ -69,6 +216,7 @@ listen('new-message', (event) => {
   const sender = msg.sender || msg.Sender || '';
   const content = msg.content || msg.Content || '';
   const msgType = (msg.type || msg.Type || 'message').toLowerCase();
+  const to = msg.to || msg.To || '';
   const time = parseTimestamp(msg.timestamp || msg.Timestamp);
 
   // Ошибка от сервера
@@ -79,6 +227,33 @@ listen('new-message', (event) => {
   }
 
   const isSystem = sender.toLowerCase() === 'system' || sender === 'СИСТЕМА' || sender === '' || msgType === 'system';
+
+  // История сообщений, присланная сервером сразу после подключения
+  if (msgType === 'history') {
+    try {
+      const items = JSON.parse(content);
+      items.forEach((item) => {
+        const itemSender = item.sender || item.Sender || '';
+        const itemContent = item.content || item.Content || '';
+        const itemTime = parseTimestamp(item.timestamp || item.Timestamp);
+        if (itemSender) addChatMessage(itemSender, itemContent, itemTime, false, null);
+      });
+    } catch (e) {}
+    return;
+  }
+
+  // Индикатор "печатает..."
+  if (msgType === 'typing') {
+    if (!sender || sender === myUsername) return;
+    registerTyping(sender);
+    return;
+  }
+
+  // Чанк файла — не показываем как обычное сообщение, накапливаем в буфере
+  if (msgType === 'file_chunk') {
+    handleFileChunk(msg);
+    return;
+  }
 
   // Обработка списка пользователей
   if (msgType === 'user_list' || msgType === 'users' || (isSystem && content.includes(','))) {
@@ -109,13 +284,14 @@ listen('new-message', (event) => {
     return;
   }
 
-  // Чат от любого пользователя
+  // Чат от любого пользователя (публичный или личный)
   if (sender) {
     if (!onlineUsers.has(sender)) {
       onlineUsers.add(sender);
       updateUsersUI();
     }
-    addChatMessage(sender, content, time);
+    clearTyping(sender);
+    addChatMessage(sender, content, time, !!to, to);
   }
 });
 
@@ -125,6 +301,32 @@ listen('disconnected', (event) => {
     addSystemMessage('СИСТЕМА', event.payload || 'Соединение с сервером потеряно.');
   }
 });
+
+function registerTyping(user) {
+  if (typingUsers.has(user)) clearTimeout(typingUsers.get(user));
+  const timer = setTimeout(() => clearTyping(user), TYPING_TIMEOUT_MS);
+  typingUsers.set(user, timer);
+  updateTypingIndicator();
+}
+
+function clearTyping(user) {
+  if (typingUsers.has(user)) {
+    clearTimeout(typingUsers.get(user));
+    typingUsers.delete(user);
+    updateTypingIndicator();
+  }
+}
+
+function updateTypingIndicator() {
+  const names = Array.from(typingUsers.keys());
+  if (names.length === 0) {
+    typingIndicator.innerText = '';
+  } else if (names.length === 1) {
+    typingIndicator.innerText = `${names[0]} печатает...`;
+  } else {
+    typingIndicator.innerText = `${names.join(', ')} печатают...`;
+  }
+}
 
 function parseTimestamp(ts) {
   if (!ts) return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -154,6 +356,10 @@ function setConnectedState(connected) {
     statusBadge.className = 'status-badge offline';
     onlineUsers.clear();
     updateUsersUI();
+    typingUsers.forEach((t) => clearTimeout(t));
+    typingUsers.clear();
+    updateTypingIndicator();
+    incomingFiles.clear();
   }
 }
 
@@ -170,18 +376,33 @@ function updateUsersUI() {
     `;
     usersListDiv.appendChild(item);
   });
+
+  // Синхронизируем выпадающий список получателей ЛС
+  const prevValue = recipientSelect.value;
+  recipientSelect.innerHTML = '<option value="">Всем (общий чат)</option>';
+  onlineUsers.forEach(user => {
+    if (user === myUsername) return;
+    const opt = document.createElement('option');
+    opt.value = user;
+    opt.innerText = user;
+    recipientSelect.appendChild(opt);
+  });
+  if (Array.from(recipientSelect.options).some(o => o.value === prevValue)) {
+    recipientSelect.value = prevValue;
+  }
 }
 
-function addChatMessage(author, text, timeStr) {
+function addChatMessage(author, text, timeStr, isPrivate, to) {
   const avatarLetter = author.charAt(0).toUpperCase();
+  const authorLabel = isPrivate && author === myUsername ? `Вы → ${to}` : author;
 
   const div = document.createElement('div');
-  div.className = 'msg-card';
+  div.className = 'msg-card' + (isPrivate ? ' private-msg' : '');
   div.innerHTML = `
     <div class="msg-avatar">${avatarLetter}</div>
     <div class="msg-body">
       <div class="msg-header">
-        <span class="msg-author">${escapeHtml(author)}</span>
+        <span class="msg-author">${escapeHtml(authorLabel)}</span>
         <span class="msg-time">${timeStr}</span>
       </div>
       <div class="msg-text">${escapeHtml(text)}</div>
@@ -189,6 +410,35 @@ function addChatMessage(author, text, timeStr) {
   `;
   messagesDiv.appendChild(div);
   messagesDiv.scrollTop = messagesDiv.scrollHeight;
+}
+
+function addFileMessage(author, fileName, fileSize, url, isPrivate, to) {
+  const avatarLetter = (author || '?').charAt(0).toUpperCase();
+  const authorLabel = isPrivate && author === myUsername ? `Вы → ${to}` : author;
+  const sizeLabel = formatFileSize(fileSize);
+  const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+  const div = document.createElement('div');
+  div.className = 'msg-card' + (isPrivate ? ' private-msg' : '');
+  div.innerHTML = `
+    <div class="msg-avatar">${avatarLetter}</div>
+    <div class="msg-body">
+      <div class="msg-header">
+        <span class="msg-author">${escapeHtml(authorLabel)}</span>
+        <span class="msg-time">${time}</span>
+      </div>
+      <div class="msg-text">📎 Файл</div>
+      <a class="file-link" href="${url}" download="${escapeHtml(fileName)}">${escapeHtml(fileName)} (${sizeLabel})</a>
+    </div>
+  `;
+  messagesDiv.appendChild(div);
+  messagesDiv.scrollTop = messagesDiv.scrollHeight;
+}
+
+function formatFileSize(bytes) {
+  if (!bytes || bytes < 1024) return `${bytes || 0} Б`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} КБ`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} МБ`;
 }
 
 function addSystemMessage(title, text, timeStr) {

@@ -6,6 +6,7 @@ using System.Net.Sockets;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 using LANChat.Client.Models;
 
@@ -18,6 +19,9 @@ public class ChatClient
     private StreamReader? _reader;
     private StreamWriter? _writer;
     private bool _isRunning;
+    private readonly SemaphoreSlim _writeLock = new(1, 1);
+
+    public string Username { get; private set; } = string.Empty;
 
     public event Action<ChatMessage>? OnMessageReceived;
 
@@ -62,6 +66,7 @@ public class ChatClient
 
         var handshake = new ChatMessage { Sender = username, Content = "", Timestamp = DateTime.UtcNow };
         await _writer.WriteLineAsync(JsonSerializer.Serialize(handshake));
+        Username = username;
 
         string? line = await _reader.ReadLineAsync();
         if (line != null)
@@ -78,12 +83,35 @@ public class ChatClient
         _ = Task.Run(ReceiveLoop);
     }
 
-    public async Task SendMessageAsync(string text)
+    public Task SendMessageAsync(string text, string? to = null)
     {
-        if (_writer == null || !_tcpClient!.Connected) return;
+        var message = new ChatMessage { Type = "message", Content = text, Timestamp = DateTime.UtcNow, To = to };
+        return SendRawAsync(message);
+    }
 
-        var message = new ChatMessage { Content = text, Timestamp = DateTime.UtcNow };
-        await _writer.WriteLineAsync(JsonSerializer.Serialize(message));
+    public Task SendTypingAsync()
+    {
+        var message = new ChatMessage { Type = "typing", Content = "", Timestamp = DateTime.UtcNow };
+        return SendRawAsync(message);
+    }
+
+    /// <summary>Отправляет произвольное сообщение протокола (используется также для чанков файлов).</summary>
+    public async Task SendRawAsync(ChatMessage message)
+    {
+        if (_writer == null || _tcpClient == null || !_tcpClient.Connected) return;
+        string json = JsonSerializer.Serialize(message);
+
+        // Один семафор на запись: при отправке файла чанки идут пачкой,
+        // и параллельная запись из UI-потока могла бы их перемешать.
+        await _writeLock.WaitAsync();
+        try
+        {
+            await _writer.WriteLineAsync(json);
+        }
+        finally
+        {
+            _writeLock.Release();
+        }
     }
 
     public void Disconnect()

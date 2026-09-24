@@ -16,4 +16,22 @@ public class ChatMessage
 
     [JsonPropertyName("timestamp")]
     public DateTime Timestamp { get; set; } = DateTime.UtcNow;
+
+    [JsonPropertyName("to")]
+    public string? To { get; set; }
+
+    [JsonPropertyName("transferId")]
+    public string? TransferId { get; set; }
+
+    [JsonPropertyName("fileName")]
+    public string? FileName { get; set; }
+
+    [JsonPropertyName("fileSize")]
+    public long? FileSize { get; set; }
+
+    [JsonPropertyName("chunkIndex")]
+    public int? ChunkIndex { get; set; }
+
+    [JsonPropertyName("totalChunks")]
+    public int? TotalChunks { get; set; }
 }

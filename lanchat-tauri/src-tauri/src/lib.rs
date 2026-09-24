@@ -161,6 +161,25 @@ async fn send_message(state: State<'_, AppState>, content: String) -> Result<(),
 }
 
 #[tauri::command]
+async fn send_json(state: State<'_, AppState>, payload: Value) -> Result<(), String> {
+    let mut writer_guard = state.writer.lock().await;
+
+    if let Some(ref mut writer) = *writer_guard {
+        let mut json_str = payload.to_string();
+        json_str.push('\n');
+
+        if let Err(e) = writer.write_all(json_str.as_bytes()).await {
+            *writer_guard = None;
+            return Err(format!("Ошибка отправки: {}", e));
+        }
+        let _ = writer.flush().await;
+        Ok(())
+    } else {
+        Err("Отсутствует активное подключение к серверу.".into())
+    }
+}
+
+#[tauri::command]
 async fn disconnect_server(state: State<'_, AppState>) -> Result<(), String> {
     let mut writer_guard = state.writer.lock().await;
     if let Some(mut writer) = writer_guard.take() {
@@ -178,6 +197,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             connect_to_server, 
             send_message, 
+            send_json,
             disconnect_server
         ])
         .run(tauri::generate_context!())

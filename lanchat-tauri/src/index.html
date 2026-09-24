@@ -2,17 +2,17 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8" />
-  <title>LANChat - Discord Style</title>
+  <title>LANChat - new Style</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
   <div class="app">
-    <!-- Левая панель с иконкой сервера -->
+   
     <div class="servers-sidebar">
       <div class="server-icon active" title="LANChat Server">L</div>
     </div>
 
-    <!-- Панель подключения и списков -->
+    
     <div class="channels-sidebar">
       <div class="server-title">LANChat Сервер</div>
       
@@ -32,17 +32,23 @@
       <div id="users-list" class="users-list"></div>
     </div>
 
-    <!-- Основная зона чата -->
+    
     <div class="chat-area">
       <div class="chat-header">
         <span class="hashtag">#</span>
         <span class="channel-name">общий-чат</span>
         <span id="status-badge" class="status-badge offline">Офлайн</span>
       </div>
+      <div id="typing-indicator" class="typing-indicator"></div>
 
       <div id="messages" class="messages-container"></div>
 
       <div class="input-container">
+        <select id="recipient-select" title="Кому отправить">
+          <option value="">Всем (общий чат)</option>
+        </select>
+        <button id="btn-attach" type="button" title="Прикрепить файл">📎</button>
+        <input type="file" id="file-input" style="display: none;" />
         <input type="text" id="msg-input" placeholder="Написать в #общий-чат..." disabled />
       </div>
     </div>

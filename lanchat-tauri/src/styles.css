@@ -258,10 +258,13 @@ body, html {
 
 .input-container {
   padding: 0 16px 20px 16px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
 }
 
-.input-container input {
-  width: 100%;
+.input-container input[type="text"] {
+  flex: 1;
   background-color: #383a40;
   border: none;
   outline: none;
@@ -274,4 +277,67 @@ body, html {
 .input-container input:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+#recipient-select {
+  background-color: #383a40;
+  color: #dbdee1;
+  border: none;
+  outline: none;
+  border-radius: 8px;
+  padding: 0 8px;
+  height: 40px;
+  font-size: 13px;
+  max-width: 140px;
+}
+
+#btn-attach {
+  background-color: #383a40;
+  border: none;
+  color: #dbdee1;
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+#btn-attach:hover {
+  background-color: #45474e;
+}
+
+.typing-indicator {
+  min-height: 20px;
+  padding: 2px 16px;
+  font-size: 12px;
+  font-style: italic;
+  color: #949ba4;
+}
+
+.msg-card.private-msg .msg-body {
+  border-left: 3px solid #5865f2;
+  padding-left: 8px;
+}
+
+.msg-card.private-msg .msg-author::after {
+  content: " (лично)";
+  font-size: 11px;
+  font-weight: 400;
+  color: #949ba4;
+}
+
+.file-link {
+  display: inline-block;
+  margin-top: 4px;
+  padding: 8px 12px;
+  background-color: #2b2d31;
+  border-radius: 6px;
+  color: #00a8fc;
+  text-decoration: none;
+  font-size: 13px;
+}
+
+.file-link:hover {
+  text-decoration: underline;
 }
