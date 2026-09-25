@@ -41,7 +41,7 @@ public partial class MainViewModel : ObservableObject
     public ObservableCollection<string> OnlineUsers { get; } = new();
     public ObservableCollection<string> RecipientOptions { get; } = new() { EveryoneOption };
 
-    /// <summary>Код-behind подставляет реализацию через провайдер файлов Avalonia (выбор файла для отправки).</summary>
+    
     public Func<Task<(string Path, string Name, long Size)?>>? RequestFilePick { get; set; }
 
     public MainViewModel()
@@ -127,7 +127,7 @@ public partial class MainViewModel : ObservableObject
         MessageText = string.Empty;
     }
 
-    /// <summary>Вызывается из code-behind при изменении текста в поле ввода (для индикатора "печатает...").</summary>
+    
     public void NotifyTyping()
     {
         if (!IsConnected) return;
@@ -171,7 +171,7 @@ public partial class MainViewModel : ObservableObject
                 });
             }
 
-            // Сервер не отправляет файл обратно отправителю — отображаем локально сами.
+            
             Messages.Add(new ChatMessageViewModel
             {
                 Sender = to != null ? $"Вы → {to}" : Username,
@@ -264,7 +264,7 @@ public partial class MainViewModel : ObservableObject
                 });
             }
         }
-        catch { /* повреждённая история — просто пропускаем */ }
+        catch {  }
     }
 
     private void HandleFileChunk(ChatMessage msg)

@@ -17,11 +17,11 @@ namespace LANChat.Server.Models
         [JsonPropertyName("timestamp")]
         public DateTime Timestamp { get; set; } = DateTime.UtcNow;
 
-        // Получатель ЛС. Пусто/null = публичное сообщение для всех.
+        
         [JsonPropertyName("to")]
         public string? To { get; set; }
 
-        // Поля для передачи файлов чанками (type == "file_chunk").
+        
         [JsonPropertyName("transferId")]
         public string? TransferId { get; set; }
 

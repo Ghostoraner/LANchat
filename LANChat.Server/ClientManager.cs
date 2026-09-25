@@ -42,7 +42,7 @@ namespace LANChat.Server
             }
         }
 
-        /// <summary>Адресная отправка одному пользователю (для ЛС и файлов). true, если получатель онлайн.</summary>
+        
         public bool TrySendToUser(string username, string message)
         {
             if (_clients.TryGetValue(username, out var client))
@@ -53,7 +53,7 @@ namespace LANChat.Server
             return false;
         }
 
-        /// <summary>Добавляет сообщение в общую историю (только для публичных сообщений).</summary>
+        
         public void AddToHistory(string jsonMessage)
         {
             lock (_historyLock)

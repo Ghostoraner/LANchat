@@ -18,7 +18,9 @@ SKIP_DIRS = {
 SKIP_FILES = {
     "publish.sh",
     "publish.ps1",
-    "strip_comments.py"
+    "strip_comments.py",
+    "install.ps1",
+    "install.sh"
 }
 
 

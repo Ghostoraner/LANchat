@@ -14,7 +14,7 @@ public partial class ChatMessageViewModel : ObservableObject
     [ObservableProperty] private bool _isMe;
     [ObservableProperty] private bool _isPrivate;
 
-    // Файловое сообщение
+    
     [ObservableProperty] private bool _isFile;
     [ObservableProperty] private string _fileName = string.Empty;
     [ObservableProperty] private string _filePath = string.Empty;
@@ -32,6 +32,6 @@ public partial class ChatMessageViewModel : ObservableObject
         {
             Process.Start(new ProcessStartInfo(FilePath) { UseShellExecute = true });
         }
-        catch { /* не удалось открыть — не критично */ }
+        catch {  }
     }
 }

@@ -1,46 +1,38 @@
-# .NET build output
-**/bin/
-**/obj/
-
-# Visual Studio
-.vs/
+bin/
+obj/
 *.user
 *.suo
 *.userosscache
 *.sln.docstates
+.vs/
 
-# Rider / JetBrains
+release/
+
+
+lanchat-tauri/src-tauri/target/
+lanchat-tauri/src-tauri/gen/
+
+lanchat-tauri/node_modules/
+node_modules/
+npm-debug.log*
+
+
+**/Received/
+
+### === IDE === ###
 .idea/
-*.sln.iml
+.vscode/
+*.swp
+*.swo
 
-# VS Code
-.vscode/*
-!.vscode/extensions.json
-!.vscode/settings.json
-!.vscode/tasks.json
-!.vscode/launch.json
 
-# NuGet
-packages/
-*.nupkg
-*.snupkg
-
-# Logs
-*.log
-
-# OS files
 .DS_Store
 Thumbs.db
 desktop.ini
 
-# Test results
-TestResults/
-*.trx
 
-# Publish output
-publish/
-artifacts/
+*.log
+*.tmp
 
-# Generated files
-*.generated.cs
-target/
+*.zip
+*.tar.gz

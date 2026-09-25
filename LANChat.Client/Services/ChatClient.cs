@@ -95,14 +95,13 @@ public class ChatClient
         return SendRawAsync(message);
     }
 
-    /// <summary>Отправляет произвольное сообщение протокола (используется также для чанков файлов).</summary>
+    
     public async Task SendRawAsync(ChatMessage message)
     {
         if (_writer == null || _tcpClient == null || !_tcpClient.Connected) return;
         string json = JsonSerializer.Serialize(message);
 
-        // Один семафор на запись: при отправке файла чанки идут пачкой,
-        // и параллельная запись из UI-потока могла бы их перемешать.
+        
         await _writeLock.WaitAsync();
         try
         {

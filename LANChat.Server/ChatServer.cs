@@ -28,7 +28,7 @@ namespace LANChat.Server
             _isRunning = true;
             Console.WriteLine($"[SERVER] Сервер запущен на порту {((IPEndPoint)_listener.LocalEndpoint).Port}. TLS включен.");
 
-            // Запускаем фоновый процесс обнаружения в LAN
+            
             _ = Task.Run(StartDiscoveryBroadcaster);
 
             try

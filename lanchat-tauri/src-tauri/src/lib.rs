@@ -105,7 +105,7 @@ async fn connect_to_server(
     let app_handle = app.clone();
     let writer_ref = Arc::clone(&state.writer);
 
-    // Фоновое чтение сразу всех пакетов от сервера без задержек
+    
     tokio::spawn(async move {
         let mut reader = BufReader::new(read_half);
         let mut line = String::new();

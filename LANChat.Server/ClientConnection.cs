@@ -26,7 +26,7 @@ namespace LANChat.Server
         private const int MaxMessageLength = 8192; 
         private const int RateLimitMs = 500;
         private const int MaxUsernameLength = 32;
-        private const int MaxFileChunks = 5000; // ~5000 * ~4KB ≈ 20MB предел на файл
+        private const int MaxFileChunks = 5000; 
         private static readonly TimeSpan HandshakeTimeout = TimeSpan.FromSeconds(10);
         private static readonly TimeSpan ReadTimeout = TimeSpan.FromMinutes(2);
         private static readonly TimeSpan WriteTimeout = TimeSpan.FromSeconds(10);
@@ -57,8 +57,7 @@ namespace LANChat.Server
                 string requestedName = initialMsg?.Sender?.Trim() ?? "User";
                 if (string.IsNullOrEmpty(requestedName)) requestedName = "User";
 
-                // Санитизация ника: запрещаем запятую (ломает CSV-формат списка
-                // онлайн-пользователей) и ограничиваем длину.
+                
                 requestedName = requestedName.Replace(",", "").Trim();
                 if (string.IsNullOrEmpty(requestedName)) requestedName = "User";
                 if (requestedName.Length > MaxUsernameLength)
@@ -88,7 +87,7 @@ namespace LANChat.Server
                     Sender = "Система", Type = "system", Content = $"{Username} присоединился к чату.", Timestamp = DateTime.UtcNow
                 }), Username);
 
-                // Отдаём новому клиенту последние сообщения общего чата.
+                
                 var history = _clientManager.GetHistorySnapshot();
                 if (history.Count > 0)
                 {
@@ -101,8 +100,8 @@ namespace LANChat.Server
 
                 while (_tcpClient.Connected)
                 {
-                    // Тайм-аут защищает от "зависших" соединений: если клиент
-                    // подключился и молчит дольше ReadTimeout, считаем его мёртвым.
+                    
+                    
                     line = await _reader.ReadLineAsync().WaitAsync(ReadTimeout);
                     if (line == null) break;
 
@@ -114,8 +113,7 @@ namespace LANChat.Server
                     catch { continue; }
                     if (msg == null || msg.Type == "error" || msg.Type == "system") continue;
 
-                    // "Печатает..." и чанки файлов — служебный, частый трафик,
-                    // на них не распространяется общий rate limit сообщений.
+                    
                     bool isThrottleExempt = msg.Type == "typing" || msg.Type == "file_chunk";
                     if (!isThrottleExempt)
                     {
@@ -127,7 +125,7 @@ namespace LANChat.Server
                         _lastMessageTime = DateTime.UtcNow;
                     }
 
-                    // Подделка отправителя невозможна: сервер всегда переписывает Sender.
+                    
                     msg.Sender = Username;
                     msg.Timestamp = DateTime.UtcNow;
                     string outJson;
@@ -151,7 +149,7 @@ namespace LANChat.Server
                             outJson = JsonSerializer.Serialize(msg);
                             if (!string.IsNullOrEmpty(msg.To))
                             {
-                                // Личное сообщение: доставляем получателю и эхом — себе.
+                                
                                 _clientManager.TrySendToUser(msg.To, outJson);
                                 await SendMessageAsync(outJson);
                             }
