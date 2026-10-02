@@ -1,11 +1,4 @@
-# Собирает готовые к раздаче бинарники LANChat.Server и LANChat.Client
-# (self-contained, один файл, .NET runtime уже внутри — установка SDK
-# на машине получателя не требуется).
-#
-# Использование:
-#   .\publish.ps1                     # соберёт linux-x64 и win-x64
-#   .\publish.ps1 -Rids win-x64       # только один RID
-#
+
 param(
     [string[]]$Rids = @("linux-x64", "win-x64")
 )

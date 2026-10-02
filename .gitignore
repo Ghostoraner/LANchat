@@ -1,25 +1,27 @@
+
 bin/
 obj/
+lanchat-tauri/src-tauri/target/
+lanchat-tauri/src-tauri/gen/
+
+node_modules/
+lanchat-tauri/node_modules/
+npm-debug.log*
+
+
 *.user
 *.suo
 *.userosscache
 *.sln.docstates
 .vs/
 
-release/
 
-
-lanchat-tauri/src-tauri/target/
-lanchat-tauri/src-tauri/gen/
-
-lanchat-tauri/node_modules/
-node_modules/
-npm-debug.log*
-
+publish.ps1
+publish.sh
 
 **/Received/
 
-### === IDE === ###
+
 .idea/
 .vscode/
 *.swp
@@ -30,9 +32,5 @@ npm-debug.log*
 Thumbs.db
 desktop.ini
 
-
 *.log
 *.tmp
-
-*.zip
-*.tar.gz

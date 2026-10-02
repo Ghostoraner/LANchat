@@ -1,12 +1,5 @@
 #!/bin/bash
-# Собирает готовые к раздаче бинарники LANChat.Server и LANChat.Client
-# (self-contained, один файл, .NET runtime уже внутри — установка SDK
-# на машине получателя не требуется).
-#
-# Использование:
-#   ./publish.sh                     # соберёт linux-x64 и win-x64
-#   ./publish.sh linux-x64           # только один RID
-#
+
 set -e
 
 CONFIG="Release"
