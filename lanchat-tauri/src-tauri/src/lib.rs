@@ -1,11 +1,14 @@
+use base64::Engine;
 use native_tls::TlsConnector as NativeTlsConnector;
 use serde_json::{json, Value};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, State};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, WriteHalf};
 use tokio::net::TcpStream;
 use tokio::sync::Mutex;
+use tokio::task::JoinHandle;
 use tokio_native_tls::TlsConnector;
 
 fn get_iso_timestamp() -> String {
@@ -40,6 +43,12 @@ type TlsWriteHalf = WriteHalf<tokio_native_tls::TlsStream<TcpStream>>;
 pub struct AppState {
     pub writer: Arc<Mutex<Option<TlsWriteHalf>>>,
     pub username: Arc<Mutex<String>>,
+    // Хэндл фоновой задачи чтения — нужен, чтобы гарантированно оборвать её
+    // при отключении/переподключении. Без этого старое соединение продолжает
+    // жить на сервере как "зомби"-клиент и получает вообще все рассылки
+    // (сообщения, чанки файлов и т.д.) — они приходят в UI многократно,
+    // по разу за каждое такое незакрытое старое соединение.
+    pub read_task: Arc<Mutex<Option<JoinHandle<()>>>>,
 }
 
 #[tauri::command]
@@ -54,6 +63,15 @@ async fn connect_to_server(
         let mut writer_guard = state.writer.lock().await;
         if let Some(mut old_writer) = writer_guard.take() {
             let _ = old_writer.shutdown().await;
+        }
+    }
+    {
+        // Обрываем предыдущую фоновую задачу чтения, если она ещё жива —
+        // иначе старое соединение остаётся зарегистрированным на сервере
+        // и продолжает получать все рассылки параллельно с новым.
+        let mut task_guard = state.read_task.lock().await;
+        if let Some(old_task) = task_guard.take() {
+            old_task.abort();
         }
     }
 
@@ -93,6 +111,32 @@ async fn connect_to_server(
         .map_err(|e| format!("Ошибка отправки рукопожатия: {}", e))?;
     write_half.flush().await.map_err(|e| e.to_string())?;
 
+    let mut reader = BufReader::new(read_half);
+    let mut first_line = String::new();
+    let bytes_read = reader
+        .read_line(&mut first_line)
+        .await
+        .map_err(|e| format!("Ошибка чтения ответа сервера: {}", e))?;
+
+    if bytes_read == 0 {
+        return Err("Сервер закрыл соединение без ответа.".into());
+    }
+
+    let first_clean = first_line.trim();
+    let first_json: Value = serde_json::from_str(first_clean)
+        .map_err(|e| format!("Некорректный ответ сервера: {}", e))?;
+
+    // Сервер отвечает ошибкой и рвёт соединение, например при занятом нике —
+    // раньше этот ответ никак не проверялся, и клиент считал себя подключённым
+    // поверх уже закрытого сервером сокета.
+    if first_json.get("type").and_then(|v| v.as_str()) == Some("error") {
+        let reason = first_json
+            .get("content")
+            .and_then(|v| v.as_str())
+            .unwrap_or("Сервер отклонил подключение.");
+        return Err(reason.to_string());
+    }
+
     {
         let mut name_guard = state.username.lock().await;
         *name_guard = username.clone();
@@ -105,9 +149,12 @@ async fn connect_to_server(
     let app_handle = app.clone();
     let writer_ref = Arc::clone(&state.writer);
 
-    
-    tokio::spawn(async move {
-        let mut reader = BufReader::new(read_half);
+    // Первую строку (успешное подтверждение подключения) тоже показываем в UI.
+    let _ = app_handle.emit("new-message", first_json);
+
+    // Фоновое чтение сразу всех пакетов от сервера без задержек
+    let handle = tokio::spawn(async move {
+        let mut reader = reader;
         let mut line = String::new();
 
         while let Ok(bytes) = reader.read_line(&mut line).await {
@@ -130,6 +177,11 @@ async fn connect_to_server(
         }
         let _ = app_handle.emit("disconnected", "Соединение с сервером разорвано.");
     });
+
+    {
+        let mut task_guard = state.read_task.lock().await;
+        *task_guard = Some(handle);
+    }
 
     Ok(format!("Успешно подключено к {}", addr))
 }
@@ -179,11 +231,84 @@ async fn send_json(state: State<'_, AppState>, payload: Value) -> Result<(), Str
     }
 }
 
+fn home_dir() -> Option<PathBuf> {
+    std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(PathBuf::from)
+}
+
+fn unique_path(dir: &std::path::Path, file_name: &str) -> PathBuf {
+    let candidate = dir.join(file_name);
+    if !candidate.exists() {
+        return candidate;
+    }
+
+    let path = std::path::Path::new(file_name);
+    let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("file");
+    let ext = path.extension().and_then(|s| s.to_str());
+
+    let mut i = 1;
+    loop {
+        let name = match ext {
+            Some(e) => format!("{} ({}).{}", stem, i, e),
+            None => format!("{} ({})", stem, i),
+        };
+        let candidate = dir.join(name);
+        if !candidate.exists() {
+            return candidate;
+        }
+        i += 1;
+    }
+}
+
+// Сохраняет принятый файл на диск нативно, а не через <a download> на blob: URL —
+// в WebKitGTK (Linux) и временами в WebView2 (Windows) такие ссылки не открывают
+// диалог сохранения и файл просто не скачивается.
+#[tauri::command]
+async fn save_received_file(file_name: String, data_base64: String) -> Result<String, String> {
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(data_base64.as_bytes())
+        .map_err(|e| format!("Некорректные данные файла: {}", e))?;
+
+    let home = home_dir().ok_or("Не удалось определить домашнюю директорию.")?;
+    let dir = home.join("LANChat").join("Received");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("Не удалось создать папку: {}", e))?;
+
+    let safe_name = file_name.replace(['/', '\\'], "_");
+    let path = unique_path(&dir, &safe_name);
+
+    std::fs::write(&path, &bytes).map_err(|e| format!("Не удалось сохранить файл: {}", e))?;
+
+    Ok(path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+async fn open_file(path: String) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    let result = std::process::Command::new("cmd")
+        .args(["/C", "start", "", &path])
+        .spawn();
+
+    #[cfg(target_os = "macos")]
+    let result = std::process::Command::new("open").arg(&path).spawn();
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let result = std::process::Command::new("xdg-open").arg(&path).spawn();
+
+    result.map(|_| ()).map_err(|e| format!("Не удалось открыть файл: {}", e))
+}
+
 #[tauri::command]
 async fn disconnect_server(state: State<'_, AppState>) -> Result<(), String> {
     let mut writer_guard = state.writer.lock().await;
     if let Some(mut writer) = writer_guard.take() {
         let _ = writer.shutdown().await;
+    }
+    drop(writer_guard);
+
+    let mut task_guard = state.read_task.lock().await;
+    if let Some(task) = task_guard.take() {
+        task.abort();
     }
     Ok(())
 }
@@ -193,11 +318,14 @@ pub fn run() {
         .manage(AppState {
             writer: Arc::new(Mutex::new(None)),
             username: Arc::new(Mutex::new(String::new())),
+            read_task: Arc::new(Mutex::new(None)),
         })
         .invoke_handler(tauri::generate_handler![
             connect_to_server, 
             send_message, 
             send_json,
+            save_received_file,
+            open_file,
             disconnect_server
         ])
         .run(tauri::generate_context!())

@@ -1700,6 +1700,7 @@ dependencies = [
 name = "lanchat-tauri"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "native-tls",
  "serde",
  "serde_json",

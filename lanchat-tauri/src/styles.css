@@ -341,3 +341,9 @@ body, html {
 .file-link:hover {
   text-decoration: underline;
 }
+
+.file-path {
+  margin-top: 2px;
+  font-size: 11px;
+  color: #80848e;
+}

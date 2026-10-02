@@ -17,15 +17,15 @@ let isConnected = false;
 let myUsername = '';
 let onlineUsers = new Set();
 
-
+// username -> таймер, по истечении которого считаем что человек перестал печатать
 const typingUsers = new Map();
 const TYPING_TIMEOUT_MS = 3000;
 const TYPING_SEND_THROTTLE_MS = 2000;
 let lastTypingSentAt = 0;
 
-
+// Приём файлов: transferId -> { fileName, fileSize, totalChunks, chunks, sender, to }
 const incomingFiles = new Map();
-const FILE_CHUNK_CHARS = 4000; 
+const FILE_CHUNK_CHARS = 4000; // размер одного base64-чанка в символах
 
 btnConnect.addEventListener('click', async () => {
   if (isConnected) return;
@@ -42,12 +42,18 @@ btnConnect.addEventListener('click', async () => {
   btnConnect.disabled = true;
   btnConnect.innerText = 'Подключение...';
 
+  // Выставляем ДО invoke: сервер может прислать список пользователей быстрее,
+  // чем разрешится промис connect_to_server, и тогда фильтр "не показывать
+  // себя в списке получателей ЛС" не сработает, если myUsername ещё пуста.
+  myUsername = username;
+
   try {
     const res = await invoke('connect_to_server', { ip, port, username });
     myUsername = username;
     setConnectedState(true);
     addSystemMessage('СИСТЕМА', res);
   } catch (err) {
+    myUsername = '';
     setConnectedState(false);
     addSystemMessage('ОШИБКА', err);
   }
@@ -79,15 +85,16 @@ msgInput.addEventListener('keypress', async (e) => {
           to: to,
         },
       });
-      
-      
+      // Не добавляем сообщение локально: сервер разошлёт его обратно
+      // (публичное — всем включая нас, личное — эхом только нам самим),
+      // и оно отобразится через listen('new-message', ...).
     } catch (err) {
       addSystemMessage('ОШИБКА', err);
     }
   }
 });
 
-
+// Индикатор "печатает..." — отправляем не чаще, чем раз в TYPING_SEND_THROTTLE_MS
 msgInput.addEventListener('input', () => {
   if (!isConnected) return;
   const now = Date.now();
@@ -153,7 +160,7 @@ async function sendFile(file) {
     return;
   }
 
-  
+  // Сервер не отсылает файл обратно отправителю — показываем локально сами.
   const url = URL.createObjectURL(file);
   addFileMessage(myUsername, file.name, file.size, url, !!to, to);
 }
@@ -162,7 +169,7 @@ function fileToBase64(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => {
-      
+      // result выглядит как "data:<mime>;base64,AAAA..." — берём только часть после запятой
       const result = reader.result;
       const idx = result.indexOf(',');
       resolve(idx >= 0 ? result.slice(idx + 1) : result);
@@ -182,7 +189,10 @@ function handleFileChunk(msg) {
       fileName: msg.fileName || 'файл',
       fileSize: msg.fileSize || 0,
       totalChunks: msg.totalChunks || 1,
-      chunks: new Array(msg.totalChunks || 1),
+      // .fill(null) обязателен: "дырявый" new Array(n) без него молча
+      // пропускается методом .every() ниже, из-за чего файл считался
+      // "полностью собранным" уже после первого пришедшего чанка.
+      chunks: new Array(msg.totalChunks || 1).fill(null),
       sender: msg.sender,
       to: msg.to,
     };
@@ -195,17 +205,21 @@ function handleFileChunk(msg) {
   if (!isComplete) return;
 
   incomingFiles.delete(id);
-  try {
-    const base64 = entry.chunks.join('');
-    const binary = atob(base64);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-    const blob = new Blob([bytes]);
-    const url = URL.createObjectURL(blob);
-    addFileMessage(entry.sender, entry.fileName, entry.fileSize, url, !!entry.to, entry.to);
-  } catch (e) {
-    addSystemMessage('ОШИБКА', `Не удалось собрать файл "${entry.fileName}": ${e}`);
-  }
+  (async () => {
+    try {
+      const base64 = entry.chunks.join('');
+      // Сохраняем на диск нативно через Rust: <a download> на blob: URL
+      // ненадёжен внутри WebView (особенно WebKitGTK на Linux) — файл
+      // часто просто не скачивается или открывается как пустая страница.
+      const savedPath = await invoke('save_received_file', {
+        fileName: entry.fileName,
+        dataBase64: base64,
+      });
+      addFileMessage(entry.sender, entry.fileName, entry.fileSize, savedPath, !!entry.to, entry.to, true);
+    } catch (e) {
+      addSystemMessage('ОШИБКА', `Не удалось сохранить файл "${entry.fileName}": ${e}`);
+    }
+  })();
 }
 
 listen('new-message', (event) => {
@@ -218,7 +232,7 @@ listen('new-message', (event) => {
   const to = msg.to || msg.To || '';
   const time = parseTimestamp(msg.timestamp || msg.Timestamp);
 
-  
+  // Ошибка от сервера
   if (msgType === 'error' || content.toLowerCase().includes('занят')) {
     addSystemMessage('ОШИБКА СЕРВЕРА', content);
     setConnectedState(false);
@@ -227,7 +241,7 @@ listen('new-message', (event) => {
 
   const isSystem = sender.toLowerCase() === 'system' || sender === 'СИСТЕМА' || sender === '' || msgType === 'system';
 
-  
+  // История сообщений, присланная сервером сразу после подключения
   if (msgType === 'history') {
     try {
       const items = JSON.parse(content);
@@ -241,20 +255,20 @@ listen('new-message', (event) => {
     return;
   }
 
-  
+  // Индикатор "печатает..."
   if (msgType === 'typing') {
     if (!sender || sender === myUsername) return;
     registerTyping(sender);
     return;
   }
 
-  
+  // Чанк файла — не показываем как обычное сообщение, накапливаем в буфере
   if (msgType === 'file_chunk') {
     handleFileChunk(msg);
     return;
   }
 
-  
+  // Обработка списка пользователей
   if (msgType === 'user_list' || msgType === 'users' || (isSystem && content.includes(','))) {
     onlineUsers.clear();
     content.split(',').forEach(u => {
@@ -265,7 +279,7 @@ listen('new-message', (event) => {
     if (msgType === 'user_list' || msgType === 'users') return;
   }
 
-  
+  // Обработка системных оповещений
   if (isSystem) {
     if (content.includes('присоединился') || content.includes('приєднався')) {
       const parts = content.trim().split(' ');
@@ -283,7 +297,7 @@ listen('new-message', (event) => {
     return;
   }
 
-  
+  // Чат от любого пользователя (публичный или личный)
   if (sender) {
     if (!onlineUsers.has(sender)) {
       onlineUsers.add(sender);
@@ -376,7 +390,7 @@ function updateUsersUI() {
     usersListDiv.appendChild(item);
   });
 
-  
+  // Синхронизируем выпадающий список получателей ЛС
   const prevValue = recipientSelect.value;
   recipientSelect.innerHTML = '<option value="">Всем (общий чат)</option>';
   onlineUsers.forEach(user => {
@@ -411,7 +425,7 @@ function addChatMessage(author, text, timeStr, isPrivate, to) {
   messagesDiv.scrollTop = messagesDiv.scrollHeight;
 }
 
-function addFileMessage(author, fileName, fileSize, url, isPrivate, to) {
+function addFileMessage(author, fileName, fileSize, urlOrPath, isPrivate, to, isNativePath) {
   const avatarLetter = (author || '?').charAt(0).toUpperCase();
   const authorLabel = isPrivate && author === myUsername ? `Вы → ${to}` : author;
   const sizeLabel = formatFileSize(fileSize);
@@ -419,6 +433,15 @@ function addFileMessage(author, fileName, fileSize, url, isPrivate, to) {
 
   const div = document.createElement('div');
   div.className = 'msg-card' + (isPrivate ? ' private-msg' : '');
+
+  // Принятые файлы сохранены на диск нативно (Rust) — открываем их через
+  // OS-команду (invoke('open_file')), а не через <a download> на blob: URL,
+  // которая ненадёжна в WebView (особенно WebKitGTK на Linux).
+  const linkHtml = isNativePath
+    ? `<a class="file-link" href="#" data-path="${escapeHtml(urlOrPath)}">${escapeHtml(fileName)} (${sizeLabel})</a>
+       <div class="file-path">${escapeHtml(urlOrPath)}</div>`
+    : `<a class="file-link" href="${urlOrPath}" download="${escapeHtml(fileName)}">${escapeHtml(fileName)} (${sizeLabel})</a>`;
+
   div.innerHTML = `
     <div class="msg-avatar">${avatarLetter}</div>
     <div class="msg-body">
@@ -427,9 +450,18 @@ function addFileMessage(author, fileName, fileSize, url, isPrivate, to) {
         <span class="msg-time">${time}</span>
       </div>
       <div class="msg-text">📎 Файл</div>
-      <a class="file-link" href="${url}" download="${escapeHtml(fileName)}">${escapeHtml(fileName)} (${sizeLabel})</a>
+      ${linkHtml}
     </div>
   `;
+
+  if (isNativePath) {
+    const link = div.querySelector('.file-link');
+    link.addEventListener('click', (e) => {
+      e.preventDefault();
+      invoke('open_file', { path: urlOrPath }).catch((err) => addSystemMessage('ОШИБКА', 'Не удалось открыть файл: ' + err));
+    });
+  }
+
   messagesDiv.appendChild(div);
   messagesDiv.scrollTop = messagesDiv.scrollHeight;
 }
