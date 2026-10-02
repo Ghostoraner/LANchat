@@ -17,13 +17,13 @@ let isConnected = false;
 let myUsername = '';
 let onlineUsers = new Set();
 
-// username -> таймер, по истечении которого считаем что человек перестал печатать
+// username 
 const typingUsers = new Map();
 const TYPING_TIMEOUT_MS = 3000;
 const TYPING_SEND_THROTTLE_MS = 2000;
 let lastTypingSentAt = 0;
 
-// Приём файлов: transferId -> { fileName, fileSize, totalChunks, chunks, sender, to }
+// Приём файлов
 const incomingFiles = new Map();
 const FILE_CHUNK_CHARS = 4000; // размер одного base64-чанка в символах
 
@@ -42,9 +42,6 @@ btnConnect.addEventListener('click', async () => {
   btnConnect.disabled = true;
   btnConnect.innerText = 'Подключение...';
 
-  // Выставляем ДО invoke: сервер может прислать список пользователей быстрее,
-  // чем разрешится промис connect_to_server, и тогда фильтр "не показывать
-  // себя в списке получателей ЛС" не сработает, если myUsername ещё пуста.
   myUsername = username;
 
   try {
@@ -85,16 +82,14 @@ msgInput.addEventListener('keypress', async (e) => {
           to: to,
         },
       });
-      // Не добавляем сообщение локально: сервер разошлёт его обратно
-      // (публичное — всем включая нас, личное — эхом только нам самим),
-      // и оно отобразится через listen('new-message', ...).
+     
     } catch (err) {
       addSystemMessage('ОШИБКА', err);
     }
   }
 });
 
-// Индикатор "печатает..." — отправляем не чаще, чем раз в TYPING_SEND_THROTTLE_MS
+// Индикатор 
 msgInput.addEventListener('input', () => {
   if (!isConnected) return;
   const now = Date.now();
@@ -160,7 +155,7 @@ async function sendFile(file) {
     return;
   }
 
-  // Сервер не отсылает файл обратно отправителю — показываем локально сами.
+ 
   const url = URL.createObjectURL(file);
   addFileMessage(myUsername, file.name, file.size, url, !!to, to);
 }
@@ -169,7 +164,6 @@ function fileToBase64(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => {
-      // result выглядит как "data:<mime>;base64,AAAA..." — берём только часть после запятой
       const result = reader.result;
       const idx = result.indexOf(',');
       resolve(idx >= 0 ? result.slice(idx + 1) : result);
@@ -189,9 +183,7 @@ function handleFileChunk(msg) {
       fileName: msg.fileName || 'файл',
       fileSize: msg.fileSize || 0,
       totalChunks: msg.totalChunks || 1,
-      // .fill(null) обязателен: "дырявый" new Array(n) без него молча
-      // пропускается методом .every() ниже, из-за чего файл считался
-      // "полностью собранным" уже после первого пришедшего чанка.
+    
       chunks: new Array(msg.totalChunks || 1).fill(null),
       sender: msg.sender,
       to: msg.to,
@@ -208,9 +200,7 @@ function handleFileChunk(msg) {
   (async () => {
     try {
       const base64 = entry.chunks.join('');
-      // Сохраняем на диск нативно через Rust: <a download> на blob: URL
-      // ненадёжен внутри WebView (особенно WebKitGTK на Linux) — файл
-      // часто просто не скачивается или открывается как пустая страница.
+      
       const savedPath = await invoke('save_received_file', {
         fileName: entry.fileName,
         dataBase64: base64,
@@ -232,7 +222,7 @@ listen('new-message', (event) => {
   const to = msg.to || msg.To || '';
   const time = parseTimestamp(msg.timestamp || msg.Timestamp);
 
-  // Ошибка от сервера
+  // Ошибка 
   if (msgType === 'error' || content.toLowerCase().includes('занят')) {
     addSystemMessage('ОШИБКА СЕРВЕРА', content);
     setConnectedState(false);
@@ -241,7 +231,7 @@ listen('new-message', (event) => {
 
   const isSystem = sender.toLowerCase() === 'system' || sender === 'СИСТЕМА' || sender === '' || msgType === 'system';
 
-  // История сообщений, присланная сервером сразу после подключения
+  // История сообщений
   if (msgType === 'history') {
     try {
       const items = JSON.parse(content);
@@ -255,20 +245,19 @@ listen('new-message', (event) => {
     return;
   }
 
-  // Индикатор "печатает..."
+  // Индикатор пачяти
   if (msgType === 'typing') {
     if (!sender || sender === myUsername) return;
     registerTyping(sender);
     return;
   }
 
-  // Чанк файла — не показываем как обычное сообщение, накапливаем в буфере
-  if (msgType === 'file_chunk') {
+    if (msgType === 'file_chunk') {
     handleFileChunk(msg);
     return;
   }
 
-  // Обработка списка пользователей
+  // список юзеров
   if (msgType === 'user_list' || msgType === 'users' || (isSystem && content.includes(','))) {
     onlineUsers.clear();
     content.split(',').forEach(u => {
@@ -390,7 +379,7 @@ function updateUsersUI() {
     usersListDiv.appendChild(item);
   });
 
-  // Синхронизируем выпадающий список получателей ЛС
+  
   const prevValue = recipientSelect.value;
   recipientSelect.innerHTML = '<option value="">Всем (общий чат)</option>';
   onlineUsers.forEach(user => {
@@ -434,9 +423,7 @@ function addFileMessage(author, fileName, fileSize, urlOrPath, isPrivate, to, is
   const div = document.createElement('div');
   div.className = 'msg-card' + (isPrivate ? ' private-msg' : '');
 
-  // Принятые файлы сохранены на диск нативно (Rust) — открываем их через
-  // OS-команду (invoke('open_file')), а не через <a download> на blob: URL,
-  // которая ненадёжна в WebView (особенно WebKitGTK на Linux).
+
   const linkHtml = isNativePath
     ? `<a class="file-link" href="#" data-path="${escapeHtml(urlOrPath)}">${escapeHtml(fileName)} (${sizeLabel})</a>
        <div class="file-path">${escapeHtml(urlOrPath)}</div>`

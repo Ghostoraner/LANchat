@@ -43,11 +43,6 @@ type TlsWriteHalf = WriteHalf<tokio_native_tls::TlsStream<TcpStream>>;
 pub struct AppState {
     pub writer: Arc<Mutex<Option<TlsWriteHalf>>>,
     pub username: Arc<Mutex<String>>,
-    // Хэндл фоновой задачи чтения — нужен, чтобы гарантированно оборвать её
-    // при отключении/переподключении. Без этого старое соединение продолжает
-    // жить на сервере как "зомби"-клиент и получает вообще все рассылки
-    // (сообщения, чанки файлов и т.д.) — они приходят в UI многократно,
-    // по разу за каждое такое незакрытое старое соединение.
     pub read_task: Arc<Mutex<Option<JoinHandle<()>>>>,
 }
 
@@ -66,9 +61,7 @@ async fn connect_to_server(
         }
     }
     {
-        // Обрываем предыдущую фоновую задачу чтения, если она ещё жива —
-        // иначе старое соединение остаётся зарегистрированным на сервере
-        // и продолжает получать все рассылки параллельно с новым.
+       
         let mut task_guard = state.read_task.lock().await;
         if let Some(old_task) = task_guard.take() {
             old_task.abort();
@@ -126,9 +119,7 @@ async fn connect_to_server(
     let first_json: Value = serde_json::from_str(first_clean)
         .map_err(|e| format!("Некорректный ответ сервера: {}", e))?;
 
-    // Сервер отвечает ошибкой и рвёт соединение, например при занятом нике —
-    // раньше этот ответ никак не проверялся, и клиент считал себя подключённым
-    // поверх уже закрытого сервером сокета.
+   
     if first_json.get("type").and_then(|v| v.as_str()) == Some("error") {
         let reason = first_json
             .get("content")
@@ -149,10 +140,10 @@ async fn connect_to_server(
     let app_handle = app.clone();
     let writer_ref = Arc::clone(&state.writer);
 
-    // Первую строку (успешное подтверждение подключения) тоже показываем в UI.
+   
     let _ = app_handle.emit("new-message", first_json);
 
-    // Фоновое чтение сразу всех пакетов от сервера без задержек
+  
     let handle = tokio::spawn(async move {
         let mut reader = reader;
         let mut line = String::new();
@@ -261,9 +252,7 @@ fn unique_path(dir: &std::path::Path, file_name: &str) -> PathBuf {
     }
 }
 
-// Сохраняет принятый файл на диск нативно, а не через <a download> на blob: URL —
-// в WebKitGTK (Linux) и временами в WebView2 (Windows) такие ссылки не открывают
-// диалог сохранения и файл просто не скачивается.
+
 #[tauri::command]
 async fn save_received_file(file_name: String, data_base64: String) -> Result<String, String> {
     let bytes = base64::engine::general_purpose::STANDARD
