@@ -113,7 +113,7 @@ LANChat/
 ├── lanchat-tauri/            # New-style клиент (Rust + Tauri)
 │   ├── src/                  # Frontend (HTML/CSS/JS)
 │   └── src-tauri/src/        # Backend (Rust, TCP/TLS-соединение)
-├── install.sh / install.ps1  # Автоустановка окружения + сборка
+├── install.sh  # Автоустановка окружения + сборка
 ├── publish.sh / publish.ps1  # Self-contained релизные сборки
 └── LANChat.slnx
 ```
@@ -140,7 +140,7 @@ LANChat/
 
 Не нужен ни git, ни .NET, ни Rust — всё уже собрано.
 
-1. Открой вкладку **[Releases](../../releases)** репозитория.
+1. Открой вкладку **[release](./release)** репозитория.
 2. Скачай нужный файл
 3. **Windows:**
    - Для сервера и классического клиента: скачай `LANChat-win-x64.zip`, распакуй куда угодно, запусти `LANChat.Server.exe`, затем `LANChat.Client.exe` или 
